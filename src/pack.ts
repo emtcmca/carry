@@ -3,9 +3,44 @@
  *
  * It is deliberately format-agnostic: the `content` is just a string (Markdown,
  * in practice), and carry never parses or interprets it. carry's only job is to
- * store the latest pack for a namespace and hand it back verbatim. What the pack
+ * store named packs for a namespace and hand them back verbatim. What a pack
  * *means* (voice rules, system facts, a style guide) is entirely up to the caller.
+ *
+ * A namespace holds MULTIPLE named packs (voice + systems + project, say), each
+ * keyed by a `packName`. A caller that omits the name reads/writes `"default"`,
+ * so the original single-pack behavior still works unchanged.
  */
+
+/** The pack a caller reads/writes when it does not name one. */
+export const DEFAULT_PACK_NAME = "default";
+
+/**
+ * Version of the pack *shape* (not its content). Stamped by the server onto every
+ * stored pack so a future reader can detect when the pack structure changed and
+ * adapt. Bump this only when the ContextPack shape itself changes, never on content.
+ */
+export const PACK_SCHEMA_VERSION = 1;
+
+/**
+ * A pack name must be a short, filesystem-and-URL-safe slug: 1–64 chars of
+ * lowercase letters, digits, dot, underscore, or hyphen. This keeps names usable
+ * inside the `carry://context/{pack}` resource URI and as DB keys, and rejects
+ * whitespace, path separators, and casing surprises.
+ */
+const PACK_NAME_PATTERN = /^[a-z0-9._-]{1,64}$/;
+
+/**
+ * Throw a clear error if `packName` is not a valid slug. Used by the store (so the
+ * contract holds regardless of caller) and mirrored by the server's zod schema.
+ */
+export function assertValidPackName(packName: string): void {
+  if (typeof packName !== "string" || !PACK_NAME_PATTERN.test(packName)) {
+    throw new Error(
+      `Invalid packName ${JSON.stringify(packName)}: must match [a-z0-9._-] and be 1–64 characters.`,
+    );
+  }
+}
+
 export interface ContextPack {
   /** The pack body, verbatim. Usually Markdown. carry never parses this. */
   content: string;
@@ -19,9 +54,14 @@ export interface ContextPack {
   /**
    * Opaque version marker, bumped on every successful push. Lets a reader tell
    * "is this the same pack I saw last time?" without diffing the whole body.
-   * Server-set. Monotonic per namespace.
+   * Server-set. Monotonic per (namespace, packName).
    */
   version: number;
+  /**
+   * Version of the pack shape (see PACK_SCHEMA_VERSION). Server-set on every pack
+   * so readers can detect structural changes independently of content `version`.
+   */
+  packSchema: number;
 }
 
 /** A pack as accepted from a writer, before carry stamps server-owned fields. */
