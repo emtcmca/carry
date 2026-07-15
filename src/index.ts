@@ -2,7 +2,8 @@ import express, { type Request, type Response } from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { bearerFromHeader, loadNamespaces, resolveToken, type Namespace } from "./auth.js";
 import { createMcpServer } from "./server.js";
-import { InMemoryStore, type ContextStore } from "./store.js";
+import { createStore } from "./store-factory.js";
+import type { ContextStore } from "./store.js";
 
 /**
  * carry HTTP entry point.
@@ -18,7 +19,7 @@ const PORT = Number(process.env.PORT ?? 8080);
 // Fail loudly at boot if auth is misconfigured (see auth.ts).
 const namespaces: Namespace[] = loadNamespaces(process.env.CARRY_NAMESPACES);
 
-const store: ContextStore = new InMemoryStore();
+const store: ContextStore = createStore();
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -75,6 +76,26 @@ for (const method of ["get", "delete"] as const) {
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`carry listening on :${PORT} (${namespaces.length} namespace(s))`);
-});
+// Prepare durable storage before accepting traffic, then listen.
+store
+  .init()
+  .then(() => {
+    const httpServer = app.listen(PORT, () => {
+      console.log(`carry listening on :${PORT} (${namespaces.length} namespace(s))`);
+    });
+
+    // Graceful shutdown: stop accepting connections, then release the DB handle.
+    // Render sends SIGTERM on deploy/restart; closing the store flushes and unlocks.
+    const shutdown = (signal: string) => {
+      console.log(`[carry] ${signal} received, shutting down`);
+      httpServer.close(() => {
+        void store.close().finally(() => process.exit(0));
+      });
+    };
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
+    process.on("SIGINT", () => shutdown("SIGINT"));
+  })
+  .catch((err: unknown) => {
+    console.error(`[carry] store init failed: ${(err as Error).message}`);
+    process.exit(1);
+  });
