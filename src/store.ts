@@ -11,6 +11,11 @@ import type { ContextPack, IncomingPack } from "./pack.js";
  * and belongs in a different implementation, not this interface).
  */
 export interface ContextStore {
+  /**
+   * Prepare the store for use (create tables, open connections). Idempotent:
+   * safe to call on every boot. In-memory stores make this a no-op.
+   */
+  init(): Promise<void>;
   /** Return the current pack for a namespace, or null if none has been pushed. */
   get(namespace: string): Promise<ContextPack | null>;
   /**
@@ -19,6 +24,11 @@ export interface ContextStore {
    * Returns the stored pack with server-owned fields filled in.
    */
   put(namespace: string, incoming: IncomingPack): Promise<ContextPack>;
+  /**
+   * Release resources (close DB handles). Called on graceful shutdown and by
+   * tests before deleting DB files. Idempotent; in-memory stores no-op.
+   */
+  close(): Promise<void>;
 }
 
 /**
@@ -28,6 +38,14 @@ export interface ContextStore {
  */
 export class InMemoryStore implements ContextStore {
   private readonly packs = new Map<string, ContextPack>();
+
+  async init(): Promise<void> {
+    // Nothing to prepare for process memory.
+  }
+
+  async close(): Promise<void> {
+    // Nothing to release for process memory.
+  }
 
   async get(namespace: string): Promise<ContextPack | null> {
     return this.packs.get(namespace) ?? null;

@@ -12,10 +12,18 @@ Working slices. Each slice leaves the repo in a running, verifiable state.
 - [x] Verified: `npm run smoke` (cores), `scripts/http-smoke.ts` (real MCP client
       end to end — push, read, read-only rejection, namespace isolation).
 
-## Slice 2 — durable storage
-- [ ] `LibSqlStore implements ContextStore`, backed by a Render persistent disk (or
-      Turso). Same interface; swap in `index.ts` via env (`CARRY_DB_URL`).
-- [ ] Migration/bootstrap on boot. Vitest coverage of both store impls.
+## Slice 2 — durable storage (DONE, 2026-07-15)
+- [x] `LibSqlStore implements ContextStore`, backed by a Render persistent disk (or
+      Turso). Same interface; selected in `index.ts` via env (`CARRY_DB_URL`) through
+      a `createStore` factory (falls back to in-memory with a loud warning).
+- [x] Migration/bootstrap on boot (`init()` creates the table, idempotent).
+- [x] `close()` added to the store contract; graceful SIGTERM/SIGINT shutdown in the
+      entry so Render restarts flush and unlock the DB.
+- [x] Vitest: shared contract suite over both impls (14) + durability suite (2) proving
+      a pack survives a fresh instance on the same file.
+- [x] Fixed a real bug the durability test surfaced: libSQL opens the file eagerly and
+      does not create parent dirs, so `file:./data/carry.db` crashed with SQLite error
+      14 (CANTOPEN); `LibSqlStore` now creates the parent dir up front.
 
 ## Slice 3 — the compiler + CLI
 - [ ] `carry` CLI: `carry push --from <files...>` compiles a pack from source

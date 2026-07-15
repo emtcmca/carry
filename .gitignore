@@ -8,3 +8,4 @@ dist/
 *.db-journal
 *.sqlite
 data/
+data-test/
