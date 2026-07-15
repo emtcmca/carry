@@ -26,9 +26,10 @@ you draft. Update the pack from your desk, and mobile has it on the next call.
 
 ## Status
 
-Early. Slice 1 (a runnable, auth-gated MCP server with an in-memory store) is done
-and verified end to end. See [`docs/build-plan.md`](docs/build-plan.md) for what is
-built and what is next.
+Early. Slices 1 and 2 are done and verified: a runnable, auth-gated MCP server
+(Slice 1, in-memory store) now backed by durable libSQL storage that survives a
+restart (Slice 2). See [`docs/build-plan.md`](docs/build-plan.md) for what is built
+and what is next.
 
 ## What it exposes (MCP)
 
@@ -61,8 +62,8 @@ npm run typecheck
 
 ## Roadmap
 
-Durable libSQL storage, a `carry` CLI + pack compiler (repo files → stamped pack),
-a Render one-click Blueprint, and optional multi-tenant signup. Tracked in
+A `carry` CLI + pack compiler (repo files → stamped pack), a Render one-click
+Blueprint, and optional multi-tenant signup. Tracked in
 [`docs/build-plan.md`](docs/build-plan.md).
 
 ## License
