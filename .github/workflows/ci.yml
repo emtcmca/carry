@@ -1,0 +1,22 @@
+name: CI
+
+# Typecheck + tests on every push to main and every PR. Keeps main green and gives
+# self-hosters a working reference pipeline. libSQL's native binding installs its Linux
+# glibc build under ubuntu-latest, matching the Docker runtime base.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
