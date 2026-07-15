@@ -1,0 +1,48 @@
+# carry — Render Blueprint (one-click self-host).
+#
+# Deploy: push this repo to your Git host, then in Render pick "New +" -> "Blueprint"
+# and point it at your fork. Render reads this file and provisions the service below.
+# See docs/deploy.md for the full step-by-step.
+#
+# Runtime choice: `runtime: docker` (builds the repo Dockerfile) rather than
+# `runtime: node`. The Dockerfile pins Node 22 on glibc so the @libsql/client native
+# binding loads correctly, and self-hosters get the exact same image locally and on
+# Render. (A `node` runtime would rebuild deps on Render's native env each deploy and
+# risk drift from what you tested with `docker build`.)
+
+services:
+  - type: web
+    name: carry
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # IMPORTANT: a persistent disk REQUIRES a paid instance type. The free tier has
+    # NO persistent disk — packs would live in the container's ephemeral filesystem
+    # and be lost on every restart/redeploy (effectively the in-memory fallback).
+    # `starter` is the cheapest plan that supports the disk below. See docs/deploy.md.
+    plan: starter
+    healthCheckPath: /healthz
+
+    # Durable storage for the libSQL/SQLite file. Survives restarts and redeploys.
+    disk:
+      name: carry-data
+      mountPath: /data
+      sizeGB: 1
+
+    envVars:
+      # Point libSQL at a file on the mounted disk (see disk.mountPath above).
+      - key: CARRY_DB_URL
+        value: file:/data/carry.db
+
+      # PORT is injected by Render automatically for web services — do NOT set it here.
+      # The app reads process.env.PORT (falls back to 8080 only for local runs).
+
+      # The auth contract: a JSON array of namespaces, each with distinct read/write
+      # tokens. sync:false = Render does NOT store it in the Blueprint; you paste the
+      # value in the dashboard on first deploy. Generate strong tokens per .env.example.
+      - key: CARRY_NAMESPACES
+        sync: false
+
+      # Optional: only for the hosted-Turso path (CARRY_DB_URL = libsql://...).
+      # Leave unset when using the on-disk file: URL above.
+      - key: CARRY_DB_AUTH_TOKEN
+        sync: false
