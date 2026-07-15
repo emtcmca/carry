@@ -1,0 +1,40 @@
+# Keep the build context small and deterministic. The image builds from source:
+# it needs package.json, package-lock.json, tsconfig.json, and src/ — nothing else.
+
+# Dependencies + build output are produced inside the image, never copied in.
+node_modules/
+dist/
+
+# Secrets and local env — NEVER bake these into an image layer.
+.env
+.env.local
+.env.*.local
+
+# Local libSQL/SQLite data (would leak state into the image; disk is mounted at runtime).
+*.db
+*.db-journal
+*.sqlite
+data/
+data-test/
+
+# VCS + tooling metadata.
+.git/
+.gitignore
+.github/
+
+# Tests, docs, ops, and deploy config are not needed to build/run the server.
+tests/
+docs/
+ops/
+scripts/
+*.md
+render.yaml
+Dockerfile
+.dockerignore
+
+# Editor / OS noise.
+.vscode/
+.idea/
+*.log
+.DS_Store
+Thumbs.db
