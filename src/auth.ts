@@ -10,7 +10,26 @@
  * for a DB lookup — the `resolveToken` logic below does not change.
  */
 
+import { createHash, timingSafeEqual } from "node:crypto";
+
 export type Scope = "read" | "write";
+
+/**
+ * Constant-time token comparison.
+ *
+ * `crypto.timingSafeEqual` throws if the two buffers differ in length, which would
+ * itself leak the secret's length through the throw/no-throw branch. To sidestep
+ * that, hash both inputs to a fixed 32-byte SHA-256 digest first, then compare the
+ * digests: the comparison inputs are always the same length, so the compare is a
+ * true constant-time operation over equal-length buffers regardless of the raw
+ * token lengths. (SHA-256 is not for secrecy here — the tokens are compared, not
+ * stored — it is purely to normalize length before the timing-safe compare.)
+ */
+function tokensEqual(a: string, b: string): boolean {
+  const da = createHash("sha256").update(a, "utf8").digest();
+  const db = createHash("sha256").update(b, "utf8").digest();
+  return timingSafeEqual(da, db);
+}
 
 export interface Namespace {
   namespace: string;
@@ -74,14 +93,16 @@ export function bearerFromHeader(header: string | undefined): string | null {
 
 /**
  * Resolve a presented token to an AuthContext, or null if it matches nothing.
- * Uses a constant-time-ish compare via matching after collecting candidates to
- * avoid trivially leaking which namespace a token belongs to through timing.
+ * Compares against every configured token with a constant-time compare (see
+ * `tokensEqual`) so an attacker cannot learn a token byte-by-byte from response
+ * timing. Write is checked before read; a token can only ever match one entry
+ * because loadNamespaces rejects identical read/write tokens.
  */
 export function resolveToken(token: string | null, namespaces: Namespace[]): AuthContext | null {
   if (!token) return null;
   for (const ns of namespaces) {
-    if (token === ns.writeToken) return { namespace: ns.namespace, scope: "write" };
-    if (token === ns.readToken) return { namespace: ns.namespace, scope: "read" };
+    if (tokensEqual(token, ns.writeToken)) return { namespace: ns.namespace, scope: "write" };
+    if (tokensEqual(token, ns.readToken)) return { namespace: ns.namespace, scope: "read" };
   }
   return null;
 }

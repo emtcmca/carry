@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { InMemoryStore, type ContextStore } from "../src/store.js";
+import { InMemoryStore, VersionConflictError, type ContextStore } from "../src/store.js";
 import { LibSqlStore } from "../src/libsql-store.js";
 
 /**
@@ -128,5 +128,101 @@ describe.each(implementations)("ContextStore contract: %s", (_name, make) => {
     // A well-formed name using every allowed class is accepted.
     const ok = await store.put("eric", "voice.systems_1-2", { content: "ok" });
     expect(ok.version).toBe(1);
+  });
+
+  // --- optimistic concurrency (expectedVersion) ---
+
+  it("first write with expectedVersion:0 succeeds and creates version 1", async () => {
+    const pack = await store.put("eric", "default", { content: "first" }, { expectedVersion: 0 });
+    expect(pack.version).toBe(1);
+    expect((await store.get("eric", "default"))?.content).toBe("first");
+  });
+
+  it("a correct expectedVersion writes and increments", async () => {
+    await store.put("eric", "default", { content: "v1" }); // no expectation -> v1
+    const v2 = await store.put("eric", "default", { content: "v2" }, { expectedVersion: 1 });
+    expect(v2.version).toBe(2);
+    const v3 = await store.put("eric", "default", { content: "v3" }, { expectedVersion: 2 });
+    expect(v3.version).toBe(3);
+    expect((await store.get("eric", "default"))?.content).toBe("v3");
+  });
+
+  it("a stale expectedVersion is rejected and does NOT mutate the pack", async () => {
+    await store.put("eric", "default", { content: "v1" });
+    await store.put("eric", "default", { content: "v2" }); // now at version 2
+    await expect(
+      store.put("eric", "default", { content: "stale write" }, { expectedVersion: 1 }),
+    ).rejects.toBeInstanceOf(VersionConflictError);
+    // Unchanged: still v2 with the old content, no phantom version 3.
+    const got = await store.get("eric", "default");
+    expect(got?.version).toBe(2);
+    expect(got?.content).toBe("v2");
+    expect(await store.listVersions("eric", "default")).toEqual([1, 2]);
+  });
+
+  it("VersionConflictError carries expected and current", async () => {
+    await store.put("eric", "default", { content: "v1" });
+    try {
+      await store.put("eric", "default", { content: "x" }, { expectedVersion: 5 });
+      throw new Error("expected a conflict");
+    } catch (err) {
+      expect(err).toBeInstanceOf(VersionConflictError);
+      expect((err as VersionConflictError).expected).toBe(5);
+      expect((err as VersionConflictError).current).toBe(1);
+    }
+  });
+
+  it("expectedVersion:0 against an existing pack is rejected", async () => {
+    await store.put("eric", "default", { content: "already here" });
+    await expect(
+      store.put("eric", "default", { content: "clobber" }, { expectedVersion: 0 }),
+    ).rejects.toBeInstanceOf(VersionConflictError);
+    expect((await store.get("eric", "default"))?.content).toBe("already here");
+  });
+
+  // --- version history ---
+
+  it("appends every put to history and reads each version back", async () => {
+    await store.put("eric", "default", { content: "one", meta: { n: 1 } });
+    await store.put("eric", "default", { content: "two" });
+    await store.put("eric", "default", { content: "three" });
+
+    expect(await store.listVersions("eric", "default")).toEqual([1, 2, 3]);
+    expect((await store.getVersion("eric", "default", 1))?.content).toBe("one");
+    expect((await store.getVersion("eric", "default", 1))?.meta).toEqual({ n: 1 });
+    expect((await store.getVersion("eric", "default", 2))?.content).toBe("two");
+    expect((await store.getVersion("eric", "default", 3))?.content).toBe("three");
+    expect((await store.getVersion("eric", "default", 3))?.version).toBe(3);
+  });
+
+  it("getVersion returns null for a version that does not exist", async () => {
+    await store.put("eric", "default", { content: "one" });
+    expect(await store.getVersion("eric", "default", 99)).toBeNull();
+    // No history at all for an unknown pack.
+    expect(await store.listVersions("eric", "unknown")).toEqual([]);
+    expect(await store.getVersion("eric", "unknown", 1)).toBeNull();
+  });
+
+  it("history is per-(namespace, packName) and defaults packName to default", async () => {
+    await store.put("eric", "default", { content: "d1" });
+    await store.put("eric", "voice", { content: "vo1" });
+    await store.put("eric", "voice", { content: "vo2" });
+    expect(await store.listVersions("eric")).toEqual([1]); // default pack
+    expect(await store.listVersions("eric", "voice")).toEqual([1, 2]);
+    // Another namespace shares nothing.
+    expect(await store.listVersions("someone-else", "voice")).toEqual([]);
+  });
+
+  it("restoring old content via put appends a new version without losing history", async () => {
+    await store.put("eric", "default", { content: "v1-body" });
+    await store.put("eric", "default", { content: "v2-body" });
+    // Simulate restore_version: read old content, put it back as a new version.
+    const old = await store.getVersion("eric", "default", 1);
+    const restored = await store.put("eric", "default", { content: old!.content });
+    expect(restored.version).toBe(3);
+    expect((await store.get("eric", "default"))?.content).toBe("v1-body");
+    // Newer history is preserved; the restore is appended as version 3.
+    expect(await store.listVersions("eric", "default")).toEqual([1, 2, 3]);
+    expect((await store.getVersion("eric", "default", 2))?.content).toBe("v2-body");
   });
 });

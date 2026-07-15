@@ -22,6 +22,32 @@ export const DEFAULT_PACK_NAME = "default";
 export const PACK_SCHEMA_VERSION = 1;
 
 /**
+ * Default byte cap on a pack's `content`, in bytes (256 KB). A context pack is
+ * meant to be voice rules / system facts / a style guide — kilobytes, not
+ * megabytes. Capping the body keeps a single push from bloating the store, a
+ * connector read, or a request body. Overridable per-deploy via CARRY_MAX_PACK_BYTES.
+ */
+export const DEFAULT_MAX_PACK_BYTES = 262144;
+
+/**
+ * Resolve the effective max pack-content size in bytes from the environment.
+ * `CARRY_MAX_PACK_BYTES`, when set, must be a positive integer; anything else is a
+ * misconfiguration and throws (fail loud, like the auth config) rather than silently
+ * falling back. Unset -> the 256 KB default.
+ */
+export function resolveMaxPackBytes(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.CARRY_MAX_PACK_BYTES?.trim();
+  if (!raw) return DEFAULT_MAX_PACK_BYTES;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(
+      `CARRY_MAX_PACK_BYTES must be a positive integer number of bytes; got ${JSON.stringify(raw)}.`,
+    );
+  }
+  return n;
+}
+
+/**
  * A pack name must be a short, filesystem-and-URL-safe slug: 1–64 chars of
  * lowercase letters, digits, dot, underscore, or hyphen. This keeps names usable
  * inside the `carry://context/{pack}` resource URI and as DB keys, and rejects

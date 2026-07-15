@@ -2,8 +2,15 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mc
 import { z } from "zod";
 import type { AuthContext } from "./auth.js";
 import { hasScope } from "./auth.js";
-import { DEFAULT_PACK_NAME } from "./pack.js";
-import type { ContextStore } from "./store.js";
+import { DEFAULT_PACK_NAME, resolveMaxPackBytes } from "./pack.js";
+import { VersionConflictError, type ContextStore } from "./store.js";
+
+/** Optional historical-version input: a non-negative integer version number. */
+const versionSchema = z
+  .number()
+  .int()
+  .min(0)
+  .describe("A specific pack version number (from list_versions).");
 
 /**
  * Zod schema for a pack name, mirroring `assertValidPackName` in pack.ts. Applied
@@ -46,14 +53,33 @@ export function createMcpServer(store: ContextStore, ctx: AuthContext): McpServe
       description:
         "Return a context pack for your namespace: the owner's latest pushed voice " +
         "rules / system facts / style guide. Omit packName for the default pack, or " +
-        "name one. Read this before drafting.",
+        "name one. Pass version to fetch a specific historical version instead of the " +
+        "current one. Read this before drafting.",
       inputSchema: {
         packName: packNameSchema,
+        version: versionSchema.optional(),
       },
     },
-    async ({ packName }) => {
-      const pack = await store.get(ctx.namespace, packName);
+    async ({ packName, version }) => {
+      // version present -> a specific historical version; absent -> current pack.
+      const pack =
+        version === undefined
+          ? await store.get(ctx.namespace, packName)
+          : await store.getVersion(ctx.namespace, packName, version);
       if (!pack) {
+        // A missing *specific version* is an error (the caller asked for something
+        // that does not exist); a missing current pack stays a plain informational reply.
+        if (version !== undefined) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: `No version ${version} of context pack "${packName}" exists for this namespace.`,
+              },
+            ],
+          };
+        }
         return {
           content: [
             {
@@ -87,9 +113,16 @@ export function createMcpServer(store: ContextStore, ctx: AuthContext): McpServe
           .record(z.unknown())
           .optional()
           .describe("Optional metadata, e.g. { source, gitHash, builtAt, title }."),
+        expectedVersion: versionSchema
+          .optional()
+          .describe(
+            "Optimistic concurrency: if set, the push only succeeds when the pack's " +
+              "current version equals this number (0 = expect no pack yet). On mismatch " +
+              "the push is rejected without writing, so a concurrent update is never clobbered.",
+          ),
       },
     },
-    async ({ content, packName, meta }) => {
+    async ({ content, packName, meta, expectedVersion }) => {
       if (!hasScope(ctx, "write")) {
         return {
           isError: true,
@@ -101,15 +134,49 @@ export function createMcpServer(store: ContextStore, ctx: AuthContext): McpServe
           ],
         };
       }
-      const pack = await store.put(ctx.namespace, packName, { content, meta });
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Pushed context pack "${packName}" v${pack.version} for "${ctx.namespace}" at ${pack.updatedAt}.`,
-          },
-        ],
-      };
+      // Enforce the pack-size cap at the tool boundary, by UTF-8 byte length.
+      const maxBytes = resolveMaxPackBytes();
+      const size = Buffer.byteLength(content, "utf8");
+      if (size > maxBytes) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `Pack content is ${size} bytes, over the ${maxBytes}-byte limit (set CARRY_MAX_PACK_BYTES to change). Trim or split the pack and retry.`,
+            },
+          ],
+        };
+      }
+      try {
+        const pack = await store.put(
+          ctx.namespace,
+          packName,
+          { content, meta },
+          expectedVersion === undefined ? undefined : { expectedVersion },
+        );
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Pushed context pack "${packName}" v${pack.version} for "${ctx.namespace}" at ${pack.updatedAt}.`,
+            },
+          ],
+        };
+      } catch (err) {
+        if (err instanceof VersionConflictError) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: `version conflict: expected ${err.expected}, current ${err.current} — re-read and retry`,
+              },
+            ],
+          };
+        }
+        throw err;
+      }
     },
   );
 
@@ -134,6 +201,89 @@ export function createMcpServer(store: ContextStore, ctx: AuthContext): McpServe
       }
       return {
         content: [{ type: "text", text: names.map((n) => `- ${n}`).join("\n") }],
+      };
+    },
+  );
+
+  // LIST VERSIONS: the append-only version history for a pack.
+  server.registerTool(
+    "list_versions",
+    {
+      title: "List context pack versions",
+      description:
+        "List the version numbers recorded for a pack, ascending (append-only history). " +
+        "Omit packName for the default pack. Use with get_context's version argument to " +
+        "read an older version, or with restore_version to bring one back.",
+      inputSchema: {
+        packName: packNameSchema,
+      },
+    },
+    async ({ packName }) => {
+      const versions = await store.listVersions(ctx.namespace, packName);
+      if (versions.length === 0) {
+        return {
+          content: [
+            { type: "text", text: `No versions recorded for pack "${packName}" in this namespace yet.` },
+          ],
+        };
+      }
+      return {
+        content: [{ type: "text", text: `Versions of "${packName}": ${versions.join(", ")}` }],
+      };
+    },
+  );
+
+  // RESTORE: re-push an old version's content as a NEW current version. Write-gated.
+  server.registerTool(
+    "restore_version",
+    {
+      title: "Restore a context pack version",
+      description:
+        "Re-publish a historical version's content as a NEW current version. This is " +
+        "append-only: the version counter is never rewound, so restoring keeps full " +
+        "history intact. Requires a write token.",
+      inputSchema: {
+        packName: packNameSchema,
+        version: versionSchema.describe("Which historical version to restore (from list_versions)."),
+      },
+    },
+    async ({ packName, version }) => {
+      if (!hasScope(ctx, "write")) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: "This token is read-only. A write token is required to restore_version.",
+            },
+          ],
+        };
+      }
+      const historical = await store.getVersion(ctx.namespace, packName, version);
+      if (!historical) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `No version ${version} of context pack "${packName}" exists to restore.`,
+            },
+          ],
+        };
+      }
+      // Append the old content as a fresh version (no expectedVersion: this is an
+      // intentional overwrite of the current head with a known-good past body).
+      const pack = await store.put(ctx.namespace, packName, {
+        content: historical.content,
+        meta: historical.meta,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Restored context pack "${packName}" version ${version} as new version ${pack.version}.`,
+          },
+        ],
       };
     },
   );
