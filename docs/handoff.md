@@ -5,22 +5,30 @@ Read this, then `docs/remaining-build-plan.md` (the work) and `docs/dev-lanes.md
 
 ---
 
-## 0. Read-me-first: work in flight RIGHT NOW
+## 0. Read-me-first: Round A status
 
-A background **core-lane agent is mid-build on Round A slice A-i** in the worktree
-`C:\Dev\carry-wt-core` (branch `feat/core`). As of this handoff its changes are UNCOMMITTED
-(modified: `src/store.ts`, `src/libsql-store.ts`, `src/pack.ts`, `src/server.ts`,
-`scripts/smoke.ts`, `tests/store.test.ts`).
+**Round A slice A-i is DONE and committed** on branch `feat/core` at `84610be` (pack model v2:
+`(namespace, packName)` keys, `list_packs`, `carry://context/{pack}`, migration runner, `packSchema`;
+47 tests, back-compat verified). It is **NOT yet merged to `main`** — Round A merges as one unit
+after A-ii. `feat/core` is 1 commit ahead of `main` (`dde9a00`).
 
-**Before doing anything in a new session:**
-1. `git -C C:/Dev/carry-wt-core status --short` — see if A-i finished (files staged/committed or still dirty).
-2. Do NOT edit `feat/core` / `carry-wt-core` or any `src/store*.ts`, `src/server.ts`,
-   `src/pack.ts` until A-i is integrated — you will collide with it.
-3. If A-i's changes are present and you want to continue: run the gates (below), commit on
-   `feat/core`, then dispatch slice A-ii (write safety + version history), then merge Round A
-   to `main` and rebase the other lanes. See `docs/remaining-build-plan.md` Round A.
+**Next up: Round A slice A-ii** (write safety + version history) on the same `feat/core` branch:
+- `crypto.timingSafeEqual` token compare (replace the plain `===` in `auth.ts`; delete the
+  "constant-time-ish" comment that overclaims).
+- `push_context` optional `expectedVersion` → **409/isError** on mismatch (optimistic concurrency
+  for multi-writer).
+- explicit max-pack-size validation with a clear error.
+- append-only `packs_history` + `list_versions` + `restore_version`; `get_context` optional `version`.
+- ADD migrations via `client.batch(stmts,"write")` appended to `MIGRATIONS` — NOT a bare
+  `transaction()` (on `:memory:` that swaps to a fresh empty DB and loses the DDL; this bit A-i).
 
-If the prior session already merged Round A, `main` will be ahead of `dde9a00` — trust `git log`.
+**Then:** merge `feat/core` → `main` `--no-ff` (Round A, one contract unit), and
+`git merge main --ff-only` the cli/deploy/docs worktrees before their next slices.
+
+**If you are a NEW session:** do NOT touch `feat/core` / `carry-wt-core` / `src/store*.ts` /
+`server.ts` / `pack.ts` / `auth.ts` if another session is still running A-ii. Check
+`git -C C:/Dev/carry-wt-core log --oneline -3` and `git -C C:/Dev/carry log --oneline -3` to see
+whether A-ii is committed and whether Round A merged.
 
 ---
 
