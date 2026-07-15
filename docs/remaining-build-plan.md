@@ -1,5 +1,10 @@
 # carry — remaining build plan (gap-informed)
 
+> **STATUS 2026-07-15:** Round A (all), B-3, C-2, CI, and the B-2 spike are DONE and on `main`
+> (106 tests). Scope fork resolved = **personal + OSS now** (Round D deferred). Everything left
+> is **human-gated**: B-1 deploy, B-4 all-surfaces verify, C-1 `/li` wiring, C-3 publish. See
+> `docs/handoff.md` §0 for the exact state and the #1 risk (bearer-in-web-connector, per the B-2 spike).
+
 Derived from the promptsmith lens review (skeptic / api-design / security / data-integrity /
 product / ux). Organized into rounds; each round is a set of lane slices. Sequenced so the
 foundational data-model and write-safety changes land BEFORE feature and deploy work builds

@@ -5,30 +5,32 @@ Read this, then `docs/remaining-build-plan.md` (the work) and `docs/dev-lanes.md
 
 ---
 
-## 0. Read-me-first: Round A status
+## 0. Read-me-first: current status (all buildable work landed)
 
-**Round A slice A-i is DONE and committed** on branch `feat/core` at `84610be` (pack model v2:
-`(namespace, packName)` keys, `list_packs`, `carry://context/{pack}`, migration runner, `packSchema`;
-47 tests, back-compat verified). It is **NOT yet merged to `main`** — Round A merges as one unit
-after A-ii. `feat/core` is 1 commit ahead of `main` (`dde9a00`).
+**Everything that does not need Eric at a keyboard is DONE, merged to `main`, and pushed to
+`origin/main`.** `main` is green: typecheck clean, **106 tests**, smoke passing. Landed this session:
+- **Round A** (merged `ef15cbb`): pack model v2 `(namespace, packName)`, migrations + `packSchema`,
+  timing-safe token compare, optimistic concurrency (`expectedVersion` → conflict), max pack size,
+  append-only version history (`list_versions` / `restore_version` / `get_context version`).
+- **B-3** (`carry init` + `carry status`), **C-2** (rate limiting + structured `/mcp` logging),
+  **CI** (GitHub Actions typecheck+test), **B-2 spike** (`docs/connector-auth-spike.md`).
+- All four lane worktrees are back at `main` (`git -C ../carry-wt-<lane> log --oneline -1`).
 
-**Next up: Round A slice A-ii** (write safety + version history) on the same `feat/core` branch:
-- `crypto.timingSafeEqual` token compare (replace the plain `===` in `auth.ts`; delete the
-  "constant-time-ish" comment that overclaims).
-- `push_context` optional `expectedVersion` → **409/isError** on mismatch (optimistic concurrency
-  for multi-writer).
-- explicit max-pack-size validation with a clear error.
-- append-only `packs_history` + `list_versions` + `restore_version`; `get_context` optional `version`.
-- ADD migrations via `client.batch(stmts,"write")` appended to `MIGRATIONS` — NOT a bare
-  `transaction()` (on `:memory:` that swaps to a fresh empty DB and loses the DDL; this bit A-i).
+**What remains is HUMAN-GATED (needs Eric), not buildable solo — see §9:**
+1. **B-1 deploy** — stand up the Render instance (Eric's account + tokens).
+2. **⚠️ #1 RISK to verify first (from the B-2 spike):** the claude.ai **web** custom-connector
+   dialog may expose only OAuth fields on personal Pro/Max accounts, so pasting carry's **bearer
+   read token** there (deploy.md Step 6, the mobile/desktop READ path) is **unverified and possibly
+   unavailable** (GitHub `claude-ai-mcp` #112, #411). The Claude Code **write** path via
+   `--header "Authorization: Bearer …"` is unaffected. **Verify the read path can be added at all
+   before trusting the mobile story.** Read `docs/connector-auth-spike.md` in full.
+3. **B-4** all-surfaces verification (mobile + desktop actually read the pack).
+4. **C-1** `/li` wiring in `C:\dev\linkedin` (needs the live instance URL + write token).
+5. **C-3** publish the launch post (`docs/launch/linkedin-carry-draft.md`) after B-1/B-4.
 
-**Then:** merge `feat/core` → `main` `--no-ff` (Round A, one contract unit), and
-`git merge main --ff-only` the cli/deploy/docs worktrees before their next slices.
-
-**If you are a NEW session:** do NOT touch `feat/core` / `carry-wt-core` / `src/store*.ts` /
-`server.ts` / `pack.ts` / `auth.ts` if another session is still running A-ii. Check
-`git -C C:/Dev/carry-wt-core log --oneline -3` and `git -C C:/Dev/carry log --oneline -3` to see
-whether A-ii is committed and whether Round A merged.
+**If you are the NEW dedicated session:** start from clean `main`. The lane/worktree system and
+scoped agents are in place (`docs/dev-lanes.md`) if you resume multi-lane work; otherwise the next
+real move is B-1 (deploy) — which is Eric-driven — then verify the bearer-read-path risk above.
 
 ---
 
