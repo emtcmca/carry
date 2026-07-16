@@ -1,36 +1,53 @@
 # carry — session handoff
 
-Snapshot for starting a fresh Claude Code session in `C:\Dev\carry`. Written 2026-07-15.
+Snapshot for starting a fresh Claude Code session in `C:\Dev\carry`. Written 2026-07-15, updated 2026-07-16.
 Read this, then `docs/remaining-build-plan.md` (the work) and `docs/dev-lanes.md` (how work is split).
 
 ---
 
-## 0. Read-me-first: current status (all buildable work landed)
+## 0. Read-me-first: current status
 
-**Everything that does not need Eric at a keyboard is DONE, merged to `main`, and pushed to
-`origin/main`.** `main` is green: typecheck clean, **106 tests**, smoke passing. Landed this session:
-- **Round A** (merged `ef15cbb`): pack model v2 `(namespace, packName)`, migrations + `packSchema`,
-  timing-safe token compare, optimistic concurrency (`expectedVersion` → conflict), max pack size,
-  append-only version history (`list_versions` / `restore_version` / `get_context version`).
+**`main` is green: typecheck clean, 128 tests, smoke passing.** Instance is **LIVE** at
+`https://carry-abxf.onrender.com` (Render starter + persistent disk; write+read paths verified
+end-to-end via the CLI on 2026-07-16). Landed across sessions:
+- **Round A**: pack model v2 `(namespace, packName)`, migrations + `packSchema`, timing-safe token
+  compare, optimistic concurrency (`expectedVersion` → conflict), max pack size, append-only version
+  history (`list_versions` / `restore_version` / `get_context version`).
 - **B-3** (`carry init` + `carry status`), **C-2** (rate limiting + structured `/mcp` logging),
   **CI** (GitHub Actions typecheck+test), **B-2 spike** (`docs/connector-auth-spike.md`).
-- All four lane worktrees are back at `main` (`git -C ../carry-wt-<lane> log --oneline -1`).
+- **B-1 deploy** — live instance stood up 2026-07-16.
+- **B-2 OAuth (WorkOS AuthKit)** — the connector-auth fix. See below.
 
-**What remains is HUMAN-GATED (needs Eric), not buildable solo — see §9:**
-1. **B-1 deploy** — stand up the Render instance (Eric's account + tokens).
-2. **⚠️ #1 RISK to verify first (from the B-2 spike):** the claude.ai **web** custom-connector
-   dialog may expose only OAuth fields on personal Pro/Max accounts, so pasting carry's **bearer
-   read token** there (deploy.md Step 6, the mobile/desktop READ path) is **unverified and possibly
-   unavailable** (GitHub `claude-ai-mcp` #112, #411). The Claude Code **write** path via
-   `--header "Authorization: Bearer …"` is unaffected. **Verify the read path can be added at all
-   before trusting the mobile story.** Read `docs/connector-auth-spike.md` in full.
-3. **B-4** all-surfaces verification (mobile + desktop actually read the pack).
-4. **C-1** `/li` wiring in `C:\dev\linkedin` (needs the live instance URL + write token).
-5. **C-3** publish the launch post (`docs/launch/linkedin-carry-draft.md`) after B-1/B-4.
+**⚠️ THE B-2 SPIKE RISK IS CONFIRMED — and fixed.** Verified live on Eric's account: the claude.ai
+**web** custom-connector dialog is **OAuth-only** (it exposes only OAuth Client ID/Secret; clicking
+Add with them blank fired OAuth Dynamic Client Registration and failed with "Couldn't register with
+Carry's sign-in service"). Pasting a bearer read token is **impossible** on a personal account, so
+the old mobile/desktop read path (deploy.md Step 6) is dead. GitHub `claude-ai-mcp` #112/#411 were
+correct. Claude Code's **write** path (`--header "Authorization: Bearer …"`) is unaffected and works.
 
-**If you are the NEW dedicated session:** start from clean `main`. The lane/worktree system and
-scoped agents are in place (`docs/dev-lanes.md`) if you resume multi-lane work; otherwise the next
-real move is B-1 (deploy) — which is Eric-driven — then verify the bearer-read-path risk above.
+**The fix (built, on `main`, OFF by default):** carry is now an OAuth 2.1 **protected resource**.
+A hosted authorization server (**WorkOS AuthKit** — free tier; hosts login+consent+DCR; no
+self-hosted frontend, which is why it beat Stytch) issues JWTs; carry serves PRM
+(`GET /.well-known/oauth-protected-resource`), a `WWW-Authenticate` 401 challenge, and validates the
+JWT with `jose`. OAuth callers get **READ scope only** (pushes stay on the Claude Code static WRITE
+token). Enabled only when `CARRY_OAUTH_ISSUER` is set, so `main` stays deployable and every existing
+behavior/test is unchanged. Code: `src/oauth.ts` (new), `authenticate()` in `src/auth.ts`, wiring in
+`src/index.ts`, `tests/oauth.test.ts` (+22 tests). Two `[unverified]`-until-live items: the JWKS
+path `${issuer}/oauth2/jwks` (override via `CARRY_OAUTH_JWKS_URL`) and whether Claude's DCR client
+accepts the exact challenge/PRM shape — both resolve at first live connect.
+
+**What remains is HUMAN-GATED (needs Eric):**
+1. **B-2 live connect** — WorkOS dashboard (create app; note the `*.authkit.app` domain = issuer;
+   register `https://carry-abxf.onrender.com/mcp` as a Resource Indicator = audience; enable DCR +
+   CIMD) → set `CARRY_OAUTH_ISSUER` + `CARRY_OAUTH_AUDIENCE` on Render → redeploy → re-add the
+   connector on claude.ai web (now OAuth discovery succeeds → WorkOS consent → token → carry reads).
+2. **B-4** all-surfaces verification (mobile + desktop actually read the pack once OAuth is live).
+3. **C-1** `/li` wiring in `C:\dev\linkedin` (compiles voice.md + voice-calibration.md, `carry push`
+   to the live instance with the WRITE token). Scouted: targets `knowledge/voice.md` +
+   `knowledge/voice-calibration.md`; repo uses `.claude/commands/li-*.md`. Buildable now.
+4. **C-3** publish the launch post (`docs/launch/linkedin-carry-draft.md`) after B-2 live + B-4.
+
+**origin push:** the OAuth slice is committed to `main` locally and NOT yet pushed — needs Eric's ok.
 
 ---
 

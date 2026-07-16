@@ -1,9 +1,20 @@
 # carry — remaining build plan (gap-informed)
 
-> **STATUS 2026-07-15:** Round A (all), B-3, C-2, CI, and the B-2 spike are DONE and on `main`
-> (106 tests). Scope fork resolved = **personal + OSS now** (Round D deferred). Everything left
-> is **human-gated**: B-1 deploy, B-4 all-surfaces verify, C-1 `/li` wiring, C-3 publish. See
-> `docs/handoff.md` §0 for the exact state and the #1 risk (bearer-in-web-connector, per the B-2 spike).
+> **STATUS 2026-07-16:** Round A (all), B-3, C-2, CI, the B-2 spike, **B-1 deploy (live)**, and
+> **B-2 OAuth implementation (WorkOS AuthKit, off-by-default)** are DONE and on `main` (128 tests).
+> Scope fork resolved = **personal + OSS now** (Round D deferred).
+>
+> **B-2 spike #1 risk CONFIRMED, then fixed:** the claude.ai web custom-connector dialog is
+> **OAuth-only** on personal accounts — pasting carry's bearer read token is impossible (verified
+> live: the dialog ran OAuth DCR and rejected the non-OAuth server). Fix built: carry is now an
+> OAuth 2.1 **protected resource**; **WorkOS AuthKit** (free tier; hosts login+consent+DCR; no
+> self-hosted frontend) is the authorization server. carry serves PRM + a 401 challenge + JWT
+> validation (`jose`); OAuth callers are READ-only; Claude Code's static WRITE bearer is unchanged.
+> OFF unless `CARRY_OAUTH_ISSUER` is set, so `main` stays deployable and existing behavior is intact.
+>
+> Everything left is **human-gated**: B-2 live connect (WorkOS dashboard + 2 Render env vars +
+> re-add connector), B-4 all-surfaces verify, C-1 `/li` wiring, C-3 publish. See `docs/handoff.md`
+> §0 for the exact state.
 
 Derived from the promptsmith lens review (skeptic / api-design / security / data-integrity /
 product / ux). Organized into rounds; each round is a set of lane slices. Sequenced so the
@@ -36,9 +47,16 @@ interface, cli/deploy/docs rebase onto the new `main` before their slices.
 ## Round B — seamless setup (deploy + core + cli) — the goal
 - **B1** deploy: Deploy Eric's instance live on Render (human-approval gate). Real tokens;
   verify `/healthz` + a real push/get end to end.
-- **B2** core: Connector-auth seamlessness. SPIKE first — does Claude custom-connector **OAuth**
-  fit carry (config once, no per-surface token paste)? If yes, implement it; if not, document
-  the tightest bearer flow. [skeptic ❌, ux ❌]
+- **B2** core: Connector-auth seamlessness. SPIKE done (`docs/connector-auth-spike.md`) → the web
+  connector dialog is OAuth-only on personal accounts (confirmed live), so bearer-paste is
+  impossible. **IMPLEMENTATION DONE:** carry is an OAuth 2.1 protected resource backed by WorkOS
+  AuthKit (off-by-default via `CARRY_OAUTH_ISSUER`); new file `src/oauth.ts` (PRM + 401 challenge +
+  `jose` JWT verify), `authenticate()` orchestrator in `src/auth.ts` (static-first, JWT fallback),
+  `GET /.well-known/oauth-protected-resource` in `src/index.ts`. OAuth callers are READ-only. New
+  env: `CARRY_OAUTH_ISSUER` / `CARRY_OAUTH_AUDIENCE` / `CARRY_OAUTH_NAMESPACE` (opt) /
+  `CARRY_OAUTH_JWKS_URL` (opt). **Remaining = live connect (human gate):** WorkOS dashboard (issuer,
+  resource indicator = audience, enable DCR+CIMD) + set the 2 Render env vars + re-add the connector.
+  [skeptic ❌, ux ❌]
 - **B3** cli: `carry init` — generate read/write tokens, write `.env`, and print the exact
   connector config (URL + auth) and claude.ai setup steps per surface. Add `carry status`
   (whoami) so a surface can confirm it is reading the live pack. [ux ❌/⚠️]

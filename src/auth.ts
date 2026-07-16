@@ -112,3 +112,36 @@ export function hasScope(ctx: AuthContext, required: Scope): boolean {
   if (required === "read") return ctx.scope === "read" || ctx.scope === "write";
   return ctx.scope === "write";
 }
+
+/**
+ * A JWT verifier: presented token in, AuthContext out, or null on any failure.
+ *
+ * This is intentionally an inline structural type, NOT an import of oauth.ts's
+ * `JwtVerifier`. oauth.ts imports `AuthContext`/`Namespace` from here; importing its
+ * `JwtVerifier` back would create a module cycle. oauth.ts's `JwtVerifier` is
+ * assignable to this signature, so callers pass it directly with no adapter.
+ */
+type JwtVerify = (token: string) => Promise<AuthContext | null>;
+
+/**
+ * Resolve a presented token to an AuthContext, trying the static tokens FIRST and
+ * only reaching for OAuth JWT verification when the static path finds nothing.
+ *
+ * This ordering is a deliberate invariant: the Claude Code static WRITE/READ path is
+ * unchanged and takes precedence; the (optional, async) JWT path is a fallback that
+ * only runs when OAuth is enabled (`verifyJwt` non-null) and a non-null token did not
+ * match any configured static token. A JWT can therefore only ever grant read scope
+ * (see oauth.ts) and never shadows a static token.
+ */
+export async function authenticate(
+  token: string | null,
+  namespaces: Namespace[],
+  verifyJwt: JwtVerify | null,
+): Promise<AuthContext | null> {
+  const staticCtx = resolveToken(token, namespaces);
+  if (staticCtx) return staticCtx;
+  // Only consult the JWT verifier when OAuth is on AND we actually have a token to
+  // verify; otherwise fall through to the static (null) result.
+  if (token !== null && verifyJwt !== null) return verifyJwt(token);
+  return null;
+}
