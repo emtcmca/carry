@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import express, { type Request, type Response } from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { bearerFromHeader, loadNamespaces, resolveToken, type Namespace } from "./auth.js";
+import { authenticate, bearerFromHeader, loadNamespaces, type Namespace } from "./auth.js";
+import {
+  createJwtVerifier,
+  loadOAuthConfig,
+  protectedResourceMetadata,
+  wwwAuthenticateChallenge,
+} from "./oauth.js";
 import { createMcpServer } from "./server.js";
 import { createStore } from "./store-factory.js";
 import type { ContextStore } from "./store.js";
@@ -31,6 +37,12 @@ setInterval(() => limiter.prune(), RATE_WINDOW_MS).unref();
 // Fail loudly at boot if auth is misconfigured (see auth.ts).
 const namespaces: Namespace[] = loadNamespaces(process.env.CARRY_NAMESPACES);
 
+// Optional OAuth 2.1 protected-resource mode (see oauth.ts). Enabled only when
+// CARRY_OAUTH_ISSUER is set; otherwise loadOAuthConfig returns null and nothing
+// about the existing static-token behavior changes. Misconfig throws loudly here.
+const oauthConfig = loadOAuthConfig(process.env, namespaces);
+const verifyJwt = oauthConfig ? createJwtVerifier(oauthConfig) : null;
+
 const store: ContextStore = createStore();
 
 const app = express();
@@ -38,6 +50,19 @@ app.use(express.json({ limit: "1mb" }));
 
 app.get("/healthz", (_req: Request, res: Response) => {
   res.json({ ok: true, service: "carry", namespaces: namespaces.length });
+});
+
+// RFC 9728 protected-resource metadata. Only serves content when OAuth is enabled;
+// when disabled it 404s so an existing (non-OAuth) deploy exposes no new surface.
+// NOTE: the optional /.well-known/oauth-authorization-server proxy is intentionally
+// NOT added in this slice — WorkOS hosts the authorization server directly; add the
+// proxy only if a live client turns out to need same-origin AS metadata.
+app.get("/.well-known/oauth-protected-resource", (_req: Request, res: Response) => {
+  if (oauthConfig) {
+    res.json(protectedResourceMetadata(oauthConfig));
+  } else {
+    res.status(404).json({ error: "not found" });
+  }
 });
 
 app.post("/mcp", async (req: Request, res: Response) => {
@@ -92,8 +117,16 @@ app.post("/mcp", async (req: Request, res: Response) => {
     return;
   }
 
-  const ctx = resolveToken(token, namespaces);
+  // Static tokens are tried first (sync); a JWT is only verified when the static
+  // path finds nothing AND OAuth is enabled (see auth.authenticate + oauth.ts).
+  const ctx = await authenticate(token, namespaces, verifyJwt);
   if (!ctx) {
+    // When OAuth is on, add the RFC 9728 challenge so an OAuth client can discover
+    // the authorization server. When off, the 401 is byte-for-byte as before (no
+    // WWW-Authenticate header) — the JSON-RPC body is unchanged either way.
+    if (oauthConfig) {
+      res.setHeader("WWW-Authenticate", wwwAuthenticateChallenge(oauthConfig));
+    }
     res.status(401).json({
       jsonrpc: "2.0",
       error: { code: -32001, message: "Unauthorized: missing or invalid bearer token." },
@@ -143,7 +176,10 @@ store
   .init()
   .then(() => {
     const httpServer = app.listen(PORT, () => {
-      console.log(`carry listening on :${PORT} (${namespaces.length} namespace(s))`);
+      console.log(
+        `carry listening on :${PORT} (${namespaces.length} namespace(s), ` +
+          `OAuth ${oauthConfig ? "enabled" : "disabled"})`,
+      );
     });
 
     // Graceful shutdown: stop accepting connections, then release the DB handle.
