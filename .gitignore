@@ -9,3 +9,5 @@ dist/
 *.sqlite
 data/
 data-test/
+# Local Claude Code project config (lane agent defs, etc.) — not for the public repo
+.claude/

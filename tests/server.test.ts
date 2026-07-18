@@ -12,8 +12,8 @@ import { InMemoryStore, type ContextStore } from "../src/store.js";
  * message — exactly as a connected Claude surface would.
  */
 
-const writeCtx: AuthContext = { namespace: "eric", scope: "write" };
-const readCtx: AuthContext = { namespace: "eric", scope: "read" };
+const writeCtx: AuthContext = { namespace: "me", scope: "write" };
+const readCtx: AuthContext = { namespace: "me", scope: "read" };
 
 async function clientFor(store: ContextStore, ctx: AuthContext): Promise<Client> {
   const server = createMcpServer(store, ctx);
@@ -37,12 +37,12 @@ function isError(result: unknown): boolean {
 
 describe("resolveToken constant-time auth", () => {
   const ns = loadNamespaces(
-    '[{"namespace":"eric","readToken":"read-token-123","writeToken":"write-token-456"}]',
+    '[{"namespace":"me","readToken":"read-token-123","writeToken":"write-token-456"}]',
   );
 
   it("resolves valid write and read tokens to the right scope", () => {
-    expect(resolveToken("write-token-456", ns)).toEqual({ namespace: "eric", scope: "write" });
-    expect(resolveToken("read-token-123", ns)).toEqual({ namespace: "eric", scope: "read" });
+    expect(resolveToken("write-token-456", ns)).toEqual({ namespace: "me", scope: "write" });
+    expect(resolveToken("read-token-123", ns)).toEqual({ namespace: "me", scope: "read" });
   });
 
   it("rejects an unknown token of the same length", () => {
@@ -108,7 +108,7 @@ describe("server tools: version history + concurrency", () => {
     expect(isError(stale)).toBe(true);
     expect(textOf(stale)).toMatch(/version conflict: expected 1, current 2 — re-read and retry/);
     // Unchanged: still v2/"b".
-    expect(await store.get("eric", "default")).toMatchObject({ version: 2, content: "b" });
+    expect(await store.get("me", "default")).toMatchObject({ version: 2, content: "b" });
     await c.close();
   });
 
@@ -133,9 +133,9 @@ describe("server tools: version history + concurrency", () => {
 
     const restored = await w.callTool({ name: "restore_version", arguments: { version: 1 } });
     expect(textOf(restored)).toContain("as new version 3");
-    expect(await store.get("eric", "default")).toMatchObject({ version: 3, content: "old-body" });
+    expect(await store.get("me", "default")).toMatchObject({ version: 3, content: "old-body" });
     // History preserved, nothing lost.
-    expect(await store.listVersions("eric", "default")).toEqual([1, 2, 3]);
+    expect(await store.listVersions("me", "default")).toEqual([1, 2, 3]);
     await w.close();
 
     // A read token cannot restore.
@@ -164,7 +164,7 @@ describe("push_context size cap", () => {
     const res = await c.callTool({ name: "push_context", arguments: { content: big } });
     expect(isError(res)).toBe(true);
     expect(textOf(res)).toMatch(/262144-byte limit/);
-    expect(await store.get("eric", "default")).toBeNull();
+    expect(await store.get("me", "default")).toBeNull();
     await c.close();
   });
 
