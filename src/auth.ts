@@ -45,7 +45,7 @@ export interface AuthContext {
 
 /**
  * Parse CARRY_NAMESPACES: a JSON array of
- *   { "namespace": "eric", "readToken": "...", "writeToken": "..." }
+ *   { "namespace": "me", "readToken": "...", "writeToken": "..." }
  * Throws on malformed config so a misconfigured deploy fails loudly at boot
  * rather than silently accepting no one (or, worse, everyone).
  */

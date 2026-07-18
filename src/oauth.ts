@@ -39,7 +39,7 @@ import type { AuthContext, Namespace } from "./auth.js";
  * - `issuer`   — the WorkOS AuthKit domain (JWT `iss`, and the PRM authorization
  *                server), e.g. `https://youthful-ginger-43.authkit.app`.
  * - `audience` — carry's canonical MCP URL, registered as the WorkOS Resource
- *                Indicator, e.g. `https://carry-abxf.onrender.com/mcp`. Used BOTH
+ *                Indicator, e.g. `https://carry.example.com/mcp`. Used BOTH
  *                as the JWT `aud` to validate AND as the PRM `resource` value.
  * - `namespace`— which configured namespace an OAuth caller maps to (read scope).
  * - `jwksUrl`  — where to fetch the AuthKit signing keys.
@@ -95,7 +95,7 @@ export function loadOAuthConfig(
     throw new Error(
       "CARRY_OAUTH_ISSUER is set but CARRY_OAUTH_AUDIENCE is not. Set the audience to " +
         "carry's canonical MCP URL (the WorkOS Resource Indicator), e.g. " +
-        "https://carry-abxf.onrender.com/mcp.",
+        "https://carry.example.com/mcp.",
     );
   }
 

@@ -71,7 +71,7 @@ Render later.
 is one object. Paste your two tokens from Step 2 in place of the placeholders:
 
 ```json
-[{"namespace":"eric","readToken":"PASTE_READ_TOKEN","writeToken":"PASTE_WRITE_TOKEN"}]
+[{"namespace":"me","readToken":"PASTE_READ_TOKEN","writeToken":"PASTE_WRITE_TOKEN"}]
 ```
 
 Keep it on **one line** — you'll paste it as a single environment-variable value.

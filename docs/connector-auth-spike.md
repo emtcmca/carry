@@ -1,5 +1,16 @@
 # Connector-auth spike (Round B, B2)
 
+> **Outcome (recommendation later reversed).** This spike recommended shipping the
+> pasted bearer token and *not* building OAuth for the personal / self-host scope.
+> That call did not survive contact with the claude.ai **web** connector dialog: on
+> personal accounts it is **OAuth-only** — there is no field to paste a bearer read
+> token, and adding a connector fires OAuth Dynamic Client Registration. The bearer
+> read path therefore could not attach a mobile/web connector at all. carry added an
+> **optional OAuth 2.1 protected-resource mode** (off by default; see the README's
+> "Auth model"). The static bearer token remains the **write** path (Claude Code /
+> CI) and still works for any MCP client that accepts an `Authorization` header. The
+> reasoning below is preserved as a record of how the original call was made.
+
 **Question:** Can OAuth (or another mechanism) make carry's connector setup
 *meaningfully* more seamless than the pasted bearer token it uses today —
 "configure once, every surface has it, no per-device token paste"? If yes,
@@ -265,8 +276,8 @@ D1 (multi-tenant, per-user tokens in a DB).
    paste carry's bearer token in the web custom-connector dialog?** Docs say
    `static_headers` exists but is **beta** and *admin/org-scoped*; GitHub issues
    #112 (closed *not planned*) and #411 say the personal add-by-URL dialog shows
-   only OAuth fields. **Unverified — confirm by hand** on Eric's live instance
-   (B1/B4). If it fails: the fallback is (a) request `static_headers` beta access,
+   only OAuth fields. **Unverified — confirm by hand** on your live instance.
+   If it fails: the fallback is (a) request `static_headers` beta access,
    or (b) reassess OAuth-via-third-party-AS — *not* an immediate full-OAuth build.
    This assumption, not OAuth, is the real risk to carry's setup story.
 2. **[MED] Does a connector added on web actually appear on Claude mobile and
@@ -280,7 +291,7 @@ D1 (multi-tenant, per-user tokens in a DB).
    Bearer …"` is the documented path and works, but there are version-specific bug
    reports (e.g. #29562, #50464) where the header isn't attached on session
    establishment. Verify carry's write push actually authenticates from the
-   Claude Code version Eric runs.
+   Claude Code version you run.
 
 ### Sources
 

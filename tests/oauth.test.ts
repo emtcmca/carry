@@ -17,13 +17,13 @@ import {
  */
 
 const ISSUER = "https://youthful-ginger-43.authkit.app";
-const AUDIENCE = "https://carry-abxf.onrender.com/mcp";
+const AUDIENCE = "https://carry.example.com/mcp";
 
 const oneNs = loadNamespaces(
-  '[{"namespace":"eric","readToken":"read-token-123","writeToken":"write-token-456"}]',
+  '[{"namespace":"me","readToken":"read-token-123","writeToken":"write-token-456"}]',
 );
 const twoNs = loadNamespaces(
-  '[{"namespace":"eric","readToken":"r1","writeToken":"w1"},' +
+  '[{"namespace":"me","readToken":"r1","writeToken":"w1"},' +
     '{"namespace":"dana","readToken":"r2","writeToken":"w2"}]',
 );
 
@@ -47,7 +47,7 @@ describe("loadOAuthConfig", () => {
       { CARRY_OAUTH_ISSUER: ISSUER, CARRY_OAUTH_AUDIENCE: AUDIENCE },
       oneNs,
     );
-    expect(cfg?.namespace).toBe("eric");
+    expect(cfg?.namespace).toBe("me");
   });
 
   it("requires CARRY_OAUTH_NAMESPACE when more than one namespace exists", () => {
@@ -118,7 +118,7 @@ describe("protectedResourceMetadata", () => {
     const config: OAuthConfig = {
       issuer: ISSUER,
       audience: AUDIENCE,
-      namespace: "eric",
+      namespace: "me",
       jwksUrl: `${ISSUER}/oauth2/jwks`,
     };
     expect(protectedResourceMetadata(config)).toEqual({
@@ -136,12 +136,12 @@ describe("wwwAuthenticateChallenge", () => {
     const config: OAuthConfig = {
       issuer: ISSUER,
       audience: AUDIENCE,
-      namespace: "eric",
+      namespace: "me",
       jwksUrl: `${ISSUER}/oauth2/jwks`,
     };
     expect(wwwAuthenticateChallenge(config)).toBe(
       'Bearer error="unauthorized", error_description="Authorization needed", ' +
-        'resource_metadata="https://carry-abxf.onrender.com/.well-known/oauth-protected-resource"',
+        'resource_metadata="https://carry.example.com/.well-known/oauth-protected-resource"',
     );
   });
 });
@@ -152,7 +152,7 @@ describe("createJwtVerifier", () => {
   const config: OAuthConfig = {
     issuer: ISSUER,
     audience: AUDIENCE,
-    namespace: "eric",
+    namespace: "me",
     jwksUrl: `${ISSUER}/oauth2/jwks`,
   };
 
@@ -185,7 +185,7 @@ describe("createJwtVerifier", () => {
     const { privateKey, keyResolver } = await makeKeys();
     const token = await sign(privateKey, { iss: ISSUER, aud: AUDIENCE, exp: "5m" });
     const verify = createJwtVerifier(config, keyResolver);
-    expect(await verify(token)).toEqual({ namespace: "eric", scope: "read" });
+    expect(await verify(token)).toEqual({ namespace: "me", scope: "read" });
   });
 
   it("rejects a token with the wrong issuer -> null", async () => {
@@ -229,7 +229,7 @@ describe("createJwtVerifier", () => {
 describe("authenticate", () => {
   // A trivial verifier that "accepts" exactly one opaque token, for wiring tests.
   const stubVerifier = async (token: string): Promise<AuthContext | null> =>
-    token === "good-jwt" ? { namespace: "eric", scope: "read" } : null;
+    token === "good-jwt" ? { namespace: "me", scope: "read" } : null;
 
   it("resolves a valid static WRITE token to write scope without consulting the JWT verifier", async () => {
     let consulted = false;
@@ -238,7 +238,7 @@ describe("authenticate", () => {
       return stubVerifier(t);
     };
     expect(await authenticate("write-token-456", oneNs, verify)).toEqual({
-      namespace: "eric",
+      namespace: "me",
       scope: "write",
     });
     expect(consulted).toBe(false);
@@ -246,14 +246,14 @@ describe("authenticate", () => {
 
   it("resolves a valid static READ token to read scope", async () => {
     expect(await authenticate("read-token-123", oneNs, stubVerifier)).toEqual({
-      namespace: "eric",
+      namespace: "me",
       scope: "read",
     });
   });
 
   it("falls back to the JWT verifier for an unknown token", async () => {
     expect(await authenticate("good-jwt", oneNs, stubVerifier)).toEqual({
-      namespace: "eric",
+      namespace: "me",
       scope: "read",
     });
   });
