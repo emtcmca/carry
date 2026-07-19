@@ -1,5 +1,8 @@
 # carry
 
+[![CI](https://github.com/emtcmca/carry/actions/workflows/ci.yml/badge.svg)](https://github.com/emtcmca/carry/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 **Carry a context pack between your Claude surfaces.** Push your voice rules,
 system facts, or style guide from Claude Code at your desk; read them from Claude
 mobile on the go. One small remote MCP server, always live, no manual re-sync.
@@ -24,6 +27,45 @@ Because Claude's remote MCP connectors are account-brokered (you add the URL onc
 on claude.ai web and it appears on your phone, desktop, and web on the same
 account), every surface reads the live pack. Update the pack from your desk, and
 the next `get_context` anywhere has it.
+
+## What you'd put in a pack
+
+carry holds one current pack per namespace — context you *author*, not memory it
+accumulates. Good packs are things you want identical on every surface:
+
+- **Voice, style, and brand.** Draft on your phone in the same voice your terminal
+  writes in — tone, banned words, formatting rules.
+- **Coding standards.** Your `CLAUDE.md` conventions — stack, naming, testing style,
+  "never do X" — on hand when you ask Claude about code from any device or repo.
+- **Project context.** Current architecture, the domain glossary, key decisions, so
+  any surface answers with your project's facts instead of generic ones.
+- **Who you are.** Your bio, stack, and tools, so you stop re-introducing yourself at
+  the start of every mobile session.
+- **A team's house rules.** One shared read pack — API conventions, style guide,
+  onboarding facts — that everyone's Claude reads the same way.
+
+What it is *not* for: fast-changing, per-conversation memory. carry is a deterministic
+pack you control, not an accumulating memory store.
+
+## Why not a slash command or CLAUDE.md?
+
+Because those are local and single-surface. A slash command lives in `.claude/commands`
+on one machine, and `CLAUDE.md` is read only by Claude Code — your phone and claude.ai
+never see either. carry is the cross-surface, single-source layer they can't be: one
+pack you update at your desk and read on demand from mobile, web, desktop, and the CLI.
+On Claude Code alone you may not need it; carry earns its place the moment you leave the
+terminal.
+
+## Try it (no deploy)
+
+```bash
+npm install
+npm run demo
+```
+
+Boots a throwaway in-memory server, pushes a sample pack with the write token, and
+reads it back with the read token — the whole loop on localhost, nothing written to
+disk.
 
 ## Self-hosted — you run it, nobody hosts it for you
 
@@ -68,12 +110,12 @@ pushing always requires the static write token. OAuth is enabled solely by setti
 changes. See [`docs/connector-auth-spike.md`](docs/connector-auth-spike.md) for
 why this path exists.
 
-> **Known limitation (read before you share a connector).** In OAuth mode, carry
-> currently trusts **any** user who can authenticate to your configured
-> authorization server / tenant. That's fine for a single-user self-host (your
-> tenant is just you). Lock-to-user (allowlisting a specific `sub`/email) is on the
-> roadmap and **not** yet built — don't point carry at a multi-user OAuth tenant
-> and treat the pack as private until it is.
+> **Lock it to yourself (OAuth mode).** By default, carry accepts any user who can
+> authenticate to your configured authorization server / tenant. For a single-user
+> self-host that tenant is just you, so this is usually fine. If your tenant has other
+> users, set an allowlist so only you can read the pack: `CARRY_OAUTH_ALLOWED_SUBS`
+> and/or `CARRY_OAUTH_ALLOWED_EMAILS` (comma-separated; a caller passes if its `sub`
+> or `email` is listed). Unset = open to the whole tenant.
 
 ## Run locally
 
@@ -127,6 +169,8 @@ All configuration is via environment variables (see [`.env.example`](.env.exampl
 | `CARRY_OAUTH_AUDIENCE` | if issuer set | carry's canonical MCP URL, registered as the OAuth resource indicator (JWT `aud`). |
 | `CARRY_OAUTH_NAMESPACE` | if >1 namespace | Which namespace OAuth callers map to (read scope). Defaults to the sole namespace when there's only one. |
 | `CARRY_OAUTH_JWKS_URL` | no | Override for the JWKS endpoint. Defaults to `${issuer}/oauth2/jwks`. |
+| `CARRY_OAUTH_ALLOWED_SUBS` | no | Lock-to-user allowlist by token `sub` (comma-separated). Unset = any authenticated tenant user. |
+| `CARRY_OAUTH_ALLOWED_EMAILS` | no | Lock-to-user allowlist by `email` claim (comma-separated, case-insensitive). A caller passes if its `sub` **or** `email` is listed. |
 
 ## Deploy your own
 

@@ -109,6 +109,27 @@ describe("loadOAuthConfig", () => {
     );
     expect(cfg?.jwksUrl).toBe(override);
   });
+
+  it("has a null allowlist when no allow vars are set", () => {
+    const cfg = loadOAuthConfig(
+      { CARRY_OAUTH_ISSUER: ISSUER, CARRY_OAUTH_AUDIENCE: AUDIENCE },
+      oneNs,
+    );
+    expect(cfg?.allowlist).toBeNull();
+  });
+
+  it("parses CARRY_OAUTH_ALLOWED_SUBS / EMAILS into an allowlist (emails lowercased)", () => {
+    const cfg = loadOAuthConfig(
+      {
+        CARRY_OAUTH_ISSUER: ISSUER,
+        CARRY_OAUTH_AUDIENCE: AUDIENCE,
+        CARRY_OAUTH_ALLOWED_SUBS: "user_a, user_b",
+        CARRY_OAUTH_ALLOWED_EMAILS: "Me@Example.com",
+      },
+      oneNs,
+    );
+    expect(cfg?.allowlist).toEqual({ subs: ["user_a", "user_b"], emails: ["me@example.com"] });
+  });
 });
 
 // --- protectedResourceMetadata ---
@@ -120,6 +141,7 @@ describe("protectedResourceMetadata", () => {
       audience: AUDIENCE,
       namespace: "me",
       jwksUrl: `${ISSUER}/oauth2/jwks`,
+      allowlist: null,
     };
     expect(protectedResourceMetadata(config)).toEqual({
       resource: AUDIENCE,
@@ -138,6 +160,7 @@ describe("wwwAuthenticateChallenge", () => {
       audience: AUDIENCE,
       namespace: "me",
       jwksUrl: `${ISSUER}/oauth2/jwks`,
+      allowlist: null,
     };
     expect(wwwAuthenticateChallenge(config)).toBe(
       'Bearer error="unauthorized", error_description="Authorization needed", ' +
@@ -154,6 +177,7 @@ describe("createJwtVerifier", () => {
     audience: AUDIENCE,
     namespace: "me",
     jwksUrl: `${ISSUER}/oauth2/jwks`,
+    allowlist: null,
   };
 
   /**
@@ -170,13 +194,16 @@ describe("createJwtVerifier", () => {
 
   function sign(
     privateKey: CryptoKey | Uint8Array,
-    claims: { iss: string; aud: string; exp?: string | number },
+    claims: { iss: string; aud: string; exp?: string | number; sub?: string; email?: string },
   ): Promise<string> {
-    const jwt = new SignJWT({})
+    const payload: Record<string, unknown> = {};
+    if (claims.email !== undefined) payload.email = claims.email;
+    const jwt = new SignJWT(payload)
       .setProtectedHeader({ alg: "ES256" })
       .setIssuer(claims.iss)
       .setAudience(claims.aud)
       .setIssuedAt();
+    if (claims.sub !== undefined) jwt.setSubject(claims.sub);
     if (claims.exp !== undefined) jwt.setExpirationTime(claims.exp);
     return jwt.sign(privateKey);
   }
@@ -221,6 +248,48 @@ describe("createJwtVerifier", () => {
     expect(await verify("not-a-jwt")).toBeNull();
     expect(await verify("a.b.c")).toBeNull();
     expect(await verify("")).toBeNull();
+  });
+
+  it("with an allowlist, accepts a token whose sub is listed", async () => {
+    const { privateKey, keyResolver } = await makeKeys();
+    const locked: OAuthConfig = { ...config, allowlist: { subs: ["user_abc"], emails: [] } };
+    const token = await sign(privateKey, { iss: ISSUER, aud: AUDIENCE, exp: "5m", sub: "user_abc" });
+    expect(await createJwtVerifier(locked, keyResolver)(token)).toEqual({
+      namespace: "me",
+      scope: "read",
+    });
+  });
+
+  it("with an allowlist, accepts a token whose email is listed (case-insensitive)", async () => {
+    const { privateKey, keyResolver } = await makeKeys();
+    const locked: OAuthConfig = { ...config, allowlist: { subs: [], emails: ["me@example.com"] } };
+    const token = await sign(privateKey, {
+      iss: ISSUER,
+      aud: AUDIENCE,
+      exp: "5m",
+      sub: "user_x",
+      email: "Me@Example.com",
+    });
+    expect(await createJwtVerifier(locked, keyResolver)(token)).toEqual({
+      namespace: "me",
+      scope: "read",
+    });
+  });
+
+  it("with an allowlist, rejects a token matching neither sub nor email -> null", async () => {
+    const { privateKey, keyResolver } = await makeKeys();
+    const locked: OAuthConfig = {
+      ...config,
+      allowlist: { subs: ["user_abc"], emails: ["me@example.com"] },
+    };
+    const token = await sign(privateKey, {
+      iss: ISSUER,
+      aud: AUDIENCE,
+      exp: "5m",
+      sub: "user_other",
+      email: "someone@else.com",
+    });
+    expect(await createJwtVerifier(locked, keyResolver)(token)).toBeNull();
   });
 });
 

@@ -49,6 +49,14 @@ export interface OAuthConfig {
   audience: string;
   namespace: string;
   jwksUrl: string;
+  /**
+   * Optional lock-to-user allowlist. `null` = disabled: any user who can
+   * authenticate to the issuer is accepted (the default, and the pre-existing
+   * behavior). When set, an OAuth caller is accepted only if the token's `sub` is
+   * in `subs` OR its `email` claim is in `emails`. Emails are stored lowercased for
+   * case-insensitive comparison.
+   */
+  allowlist: { subs: string[]; emails: string[] } | null;
 }
 
 /**
@@ -80,6 +88,11 @@ export type JWKSLike = JWTVerifyGetKey;
  *                           (trailing slash on the issuer stripped first). The path
  *                           is [unverified] against a live WorkOS tenant, hence the
  *                           override hook.
+ * - CARRY_OAUTH_ALLOWED_SUBS   — optional lock-to-user allowlist by token `sub`
+ *                           (comma-separated). Unset = trust any authenticated user.
+ * - CARRY_OAUTH_ALLOWED_EMAILS — optional lock-to-user allowlist by `email` claim
+ *                           (comma-separated, case-insensitive). Unset = no email gate.
+ *                           A caller passes if its `sub` OR its `email` is listed.
  */
 export function loadOAuthConfig(
   env: NodeJS.ProcessEnv,
@@ -128,7 +141,16 @@ export function loadOAuthConfig(
     ? jwksOverride
     : `${issuer.replace(/\/+$/, "")}/oauth2/jwks`;
 
-  return { issuer, audience, namespace, jwksUrl };
+  // Optional lock-to-user allowlist. Comma-separated; emails lowercased for a
+  // case-insensitive match. Both empty -> null -> trust any authenticated user in
+  // the issuer's tenant (the pre-existing behavior).
+  const parseList = (raw: string | undefined): string[] =>
+    (raw ?? "").split(",").map((s) => s.trim()).filter((s) => s !== "");
+  const subs = parseList(env.CARRY_OAUTH_ALLOWED_SUBS);
+  const emails = parseList(env.CARRY_OAUTH_ALLOWED_EMAILS).map((e) => e.toLowerCase());
+  const allowlist = subs.length > 0 || emails.length > 0 ? { subs, emails } : null;
+
+  return { issuer, audience, namespace, jwksUrl, allowlist };
 }
 
 /**
@@ -182,10 +204,20 @@ export function createJwtVerifier(config: OAuthConfig, jwks?: JWKSLike): JwtVeri
     try {
       // jose enforces signature, `iss`, `aud`, and expiry (`exp`) here. A mismatch
       // on any of them throws, which we swallow below into a null → 401.
-      await jwtVerify(token, keyResolver, {
+      const { payload } = await jwtVerify(token, keyResolver, {
         issuer: config.issuer,
         audience: config.audience,
       });
+      // Optional lock-to-user: when an allowlist is configured, the caller must
+      // match it by `sub` or `email`. Without it, any user the issuer authenticates
+      // is accepted. A non-matching caller is rejected as if unauthenticated (null).
+      if (config.allowlist) {
+        const sub = typeof payload.sub === "string" ? payload.sub : null;
+        const email = typeof payload.email === "string" ? payload.email.toLowerCase() : null;
+        const subOk = sub !== null && config.allowlist.subs.includes(sub);
+        const emailOk = email !== null && config.allowlist.emails.includes(email);
+        if (!subOk && !emailOk) return null;
+      }
       return { namespace: config.namespace, scope: "read" };
     } catch {
       return null;
