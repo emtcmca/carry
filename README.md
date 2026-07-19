@@ -43,6 +43,9 @@ accumulates. Good packs are things you want identical on every surface:
   the start of every mobile session.
 - **A team's house rules.** One shared read pack — API conventions, style guide,
   onboarding facts — that everyone's Claude reads the same way.
+- **Slash commands & Claude config, across machines.** Push your `.claude/commands`
+  files, then `carry pull` them onto another machine — your command library and
+  `CLAUDE.md` travel without a git remote (see the CLI below).
 
 What it is *not* for: fast-changing, per-conversation memory. carry is a deterministic
 pack you control, not an accumulating memory store.
@@ -149,10 +152,15 @@ node dist/cli.js push --url https://your-instance.example.com/mcp \
 
 # Read the current pack back (read/write token from env or --token)
 node dist/cli.js get --url https://your-instance.example.com/mcp
+
+# Pull the pack back into files — the inverse of push. Splits by source marker and
+# writes each file into the target dir. Sync your commands/config across machines.
+node dist/cli.js pull --url https://your-instance.example.com/mcp --to ./.claude/commands
 ```
 
 Tokens are read from `CARRY_WRITE_TOKEN` / `CARRY_READ_TOKEN` in the environment
-(never passed on the command line unless you use `--token`).
+(never passed on the command line unless you use `--token`). `carry pull` reduces every
+source name to a basename, so a pack can never write outside your target directory.
 
 ## Configuration
 

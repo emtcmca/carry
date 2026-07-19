@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { compilePack } from "../src/compiler.js";
+import { compilePack, splitPackIntoFiles } from "../src/compiler.js";
 
 /**
  * The compiler is pure and deterministic: gitHash/builtAt are injected, so every
@@ -66,5 +66,47 @@ describe("compilePack", () => {
     expect(meta.source).toEqual([]);
     expect(meta.gitHash).toBe("abc1234");
     expect(meta.builtAt).toBe("2026-07-15T00:00:00.000Z");
+  });
+});
+
+describe("splitPackIntoFiles", () => {
+  it("is the inverse of compilePack for a multi-file pack (bodies recovered verbatim)", () => {
+    const files = [
+      { path: "voice.md", content: "# Voice\nNo em-dashes.\n" }, // non-final, trailing newline
+      { path: "facts.md", content: "fact one\nfact two" }, // final, no trailing newline
+    ];
+    const { content } = compilePack({ files, gitHash: "x", builtAt: "y" });
+    expect(splitPackIntoFiles(content)).toEqual([
+      { name: "voice.md", content: "# Voice\nNo em-dashes.\n" },
+      { name: "facts.md", content: "fact one\nfact two" },
+    ]);
+  });
+
+  it("ignores the header and meta lines that precede the first marker", () => {
+    const { content } = compilePack({
+      files: [{ path: "a.md", content: "AAA" }],
+      gitHash: "x",
+      builtAt: "y",
+    });
+    const rendered =
+      '# Context pack "default" (v1, schema 1, updated 2026-07-15T00:00:00.000Z)\n' +
+      '<!-- meta: {"source":["a.md"]} -->\n\n' +
+      content;
+    expect(splitPackIntoFiles(rendered)).toEqual([{ name: "a.md", content: "AAA" }]);
+  });
+
+  it("preserves blank lines inside a body (only the join separator is stripped)", () => {
+    const body = "para one\n\npara two\n";
+    const { content } = compilePack({
+      files: [{ path: "a.md", content: body }],
+      gitHash: "x",
+      builtAt: "y",
+    });
+    expect(splitPackIntoFiles(content)).toEqual([{ name: "a.md", content: body }]);
+  });
+
+  it("returns [] for a pack with no source markers", () => {
+    expect(splitPackIntoFiles("raw content, never compiled from files")).toEqual([]);
+    expect(splitPackIntoFiles("")).toEqual([]);
   });
 });

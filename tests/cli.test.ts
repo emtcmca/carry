@@ -80,6 +80,24 @@ describe("parseArgs — get", () => {
   });
 });
 
+describe("parseArgs — pull", () => {
+  it("collects url, --to target, and token", () => {
+    const parsed = parseArgs([
+      "pull",
+      "--url",
+      "http://x/mcp",
+      "--to",
+      ".claude/commands",
+      "--token",
+      "r_tok",
+    ]);
+    expect(parsed.command).toBe("pull");
+    expect(parsed.url).toBe("http://x/mcp");
+    expect(parsed.to).toBe(".claude/commands");
+    expect(parsed.token).toBe("r_tok");
+  });
+});
+
 describe("parseArgs — init / status routing", () => {
   it("routes init and collects --namespace, --url, and boolean --force", () => {
     const parsed = parseArgs(["init", "--namespace", "me", "--url", "http://x/mcp", "--force"]);
