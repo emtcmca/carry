@@ -47,6 +47,15 @@ accumulates. Good packs are things you want identical on every surface:
 What it is *not* for: fast-changing, per-conversation memory. carry is a deterministic
 pack you control, not an accumulating memory store.
 
+## Why not a slash command or CLAUDE.md?
+
+Because those are local and single-surface. A slash command lives in `.claude/commands`
+on one machine, and `CLAUDE.md` is read only by Claude Code — your phone and claude.ai
+never see either. carry is the cross-surface, single-source layer they can't be: one
+pack you update at your desk and read on demand from mobile, web, desktop, and the CLI.
+On Claude Code alone you may not need it; carry earns its place the moment you leave the
+terminal.
+
 ## Try it (no deploy)
 
 ```bash
