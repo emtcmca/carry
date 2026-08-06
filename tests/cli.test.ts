@@ -11,6 +11,7 @@ import {
   renderEnv,
   runInit,
   parsePackNames,
+  packArgs,
 } from "../src/cli.js";
 
 /**
@@ -95,6 +96,48 @@ describe("parseArgs — pull", () => {
     expect(parsed.url).toBe("http://x/mcp");
     expect(parsed.to).toBe(".claude/commands");
     expect(parsed.token).toBe("r_tok");
+  });
+});
+
+describe("parseArgs — --pack", () => {
+  it("parses --pack on push, get, and pull", () => {
+    expect(parseArgs(["push", "--url", "http://x/mcp", "--from", "a.md", "--pack", "q"]).pack).toBe("q");
+    expect(parseArgs(["get", "--url", "http://x/mcp", "--pack", "voice"]).pack).toBe("voice");
+    expect(parseArgs(["pull", "--url", "http://x/mcp", "--to", ".", "--pack", "sys.1"]).pack).toBe("sys.1");
+  });
+
+  it("leaves pack undefined when the flag is absent, so the server default applies", () => {
+    expect(parseArgs(["get", "--url", "http://x/mcp"]).pack).toBeUndefined();
+  });
+
+  it("rejects a pack name the server would reject, before any network call", () => {
+    // Uppercase, spaces, and >64 chars all violate the server's packName rule.
+    expect(parseArgs(["get", "--url", "http://x/mcp", "--pack", "Q"]).error).toMatch(/Invalid --pack/);
+    expect(parseArgs(["get", "--url", "http://x/mcp", "--pack", "two words"]).error).toMatch(/Invalid --pack/);
+    expect(parseArgs(["get", "--url", "http://x/mcp", "--pack", "x".repeat(65)]).error).toMatch(/Invalid --pack/);
+    expect(parseArgs(["get", "--url", "http://x/mcp", "--pack", ""]).error).toMatch(/Invalid --pack/);
+  });
+
+  it("accepts every character class the server allows", () => {
+    expect(parseArgs(["get", "--url", "http://x/mcp", "--pack", "a-b_c.9"]).error).toBeUndefined();
+  });
+
+  it("--from stops consuming at --pack rather than swallowing it as a file", () => {
+    // --from is greedy until the next flag; a new flag must not become a filename.
+    const parsed = parseArgs(["push", "--from", "a.md", "b.md", "--pack", "q", "--url", "http://x/mcp"]);
+    expect(parsed.from).toEqual(["a.md", "b.md"]);
+    expect(parsed.pack).toBe("q");
+  });
+});
+
+describe("packArgs", () => {
+  it("omits packName entirely when no pack is given", () => {
+    // The CLI must NOT hard-code "default" — the server owns that decision.
+    expect(packArgs(undefined)).toEqual({});
+  });
+
+  it("sends packName when a pack is given", () => {
+    expect(packArgs("q")).toEqual({ packName: "q" });
   });
 });
 

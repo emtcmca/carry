@@ -34,9 +34,9 @@ export const USAGE = `carry — compile a context pack from Markdown and sync it
 Usage:
   carry init   [--namespace <name>] [--url <mcpUrl>] [--force]
   carry status --url <mcpUrl> [--token <readOrWriteToken>]
-  carry push   --url <mcpUrl> --from <file> [file ...] [--title <title>] [--token <writeToken>]
-  carry get    --url <mcpUrl> [--token <readOrWriteToken>]
-  carry pull   --url <mcpUrl> --to <dir> [--token <readOrWriteToken>]
+  carry push   --url <mcpUrl> --from <file> [file ...] [--title <title>] [--pack <name>] [--token <writeToken>]
+  carry get    --url <mcpUrl> [--pack <name>] [--token <readOrWriteToken>]
+  carry pull   --url <mcpUrl> --to <dir> [--pack <name>] [--token <readOrWriteToken>]
   carry --help
 
 init    Generate a read + write token pair and write a ready-to-use .env in the
@@ -50,7 +50,14 @@ get     Read and print the current pack via get_context.
         Token: --token, else CARRY_READ_TOKEN, else CARRY_WRITE_TOKEN.
 pull    Fetch the current pack and split it back into files by their source markers,
         writing each into <dir>. The inverse of push — sync your command/config files
-        across machines. Token: --token, else CARRY_READ_TOKEN, else CARRY_WRITE_TOKEN.`;
+        across machines. Token: --token, else CARRY_READ_TOKEN, else CARRY_WRITE_TOKEN.
+
+--pack  Target a NAMED pack instead of the default one. Names match [a-z0-9._-], 1-64
+        chars. Omit it and the server's default pack is used, which is the behaviour
+        every existing script already relies on.
+        This matters: without --pack every push lands on the default pack, so pushing a
+        second kind of context overwrites the first. Keep unrelated packs apart —
+        e.g. identity on the default pack, daily state on --pack q.`;
 
 /** Placeholder URL printed by `carry init` when the user hasn't deployed yet. */
 export const DEFAULT_MCP_URL = "https://YOUR-INSTANCE.onrender.com/mcp";
@@ -66,6 +73,15 @@ export interface ParsedArgs {
   token?: string;
   /** `pull` only: target directory to write the pulled source files into. */
   to?: string;
+  /**
+   * Which named pack to target. Omitted = the server's default pack.
+   *
+   * Without this the CLI could only ever read and write `default`, so any
+   * second pack pushed through it would silently overwrite the first. The
+   * server has supported named packs all along (`push_context`/`get_context`
+   * both take `packName`); only the CLI could not reach them.
+   */
+  pack?: string;
   /** `init` only: namespace name to stamp into .env (defaults to "me"). */
   namespace?: string;
   /** `init` only: allow overwriting an existing .env. */
@@ -112,6 +128,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
       case "--title":
         parsed.title = rest[++i];
         break;
+      case "--pack":
+        parsed.pack = rest[++i];
+        break;
       case "--namespace":
         parsed.namespace = rest[++i];
         break;
@@ -130,7 +149,32 @@ export function parseArgs(argv: string[]): ParsedArgs {
         return { ...parsed, error: `Unknown flag: ${arg}` };
     }
   }
+
+  // Validate the pack name here rather than at the wire. The server enforces
+  // the same pattern, but a local check turns a round-trip protocol error into
+  // an immediate, readable one — and this flag guards the pack that every
+  // Claude surface reads, so a typo must not become a silent write elsewhere.
+  if (parsed.pack !== undefined && !PACK_NAME_PATTERN.test(parsed.pack)) {
+    return {
+      ...parsed,
+      error: `Invalid --pack ${JSON.stringify(parsed.pack)}: must match [a-z0-9._-] and be 1-64 characters.`,
+    };
+  }
+
   return parsed;
+}
+
+/** Mirrors the server's packName rule (src/pack.ts PACK_NAME_PATTERN). */
+const PACK_NAME_PATTERN = /^[a-z0-9._-]{1,64}$/;
+
+/**
+ * Tool arguments for targeting a pack.
+ *
+ * Returns `{}` when no --pack was given so the SERVER decides the default,
+ * rather than this CLI hard-coding the string "default" and drifting from it.
+ */
+export function packArgs(pack: string | undefined): Record<string, string> {
+  return pack ? { packName: pack } : {};
 }
 
 /** Write-token resolution: explicit flag wins, else the env var. */
@@ -308,7 +352,7 @@ async function runPush(args: ParsedArgs, env: NodeJS.ProcessEnv): Promise<void> 
   try {
     const result = await client.callTool({
       name: "push_context",
-      arguments: { content, meta },
+      arguments: { content, meta, ...packArgs(args.pack) },
     });
     if ((result as { isError?: boolean }).isError) {
       throw new Error(textOf(result) || "push_context returned an error.");
@@ -332,7 +376,10 @@ async function runGet(args: ParsedArgs, env: NodeJS.ProcessEnv): Promise<void> {
 
   const client = await connect(args.url, token);
   try {
-    const result = await client.callTool({ name: "get_context", arguments: {} });
+    const result = await client.callTool({
+      name: "get_context",
+      arguments: packArgs(args.pack),
+    });
     if ((result as { isError?: boolean }).isError) {
       throw new Error(textOf(result) || "get_context returned an error.");
     }
@@ -369,7 +416,10 @@ async function runPull(args: ParsedArgs, env: NodeJS.ProcessEnv): Promise<void> 
   const client = await connect(args.url, token);
   let pack: string;
   try {
-    const result = await client.callTool({ name: "get_context", arguments: {} });
+    const result = await client.callTool({
+      name: "get_context",
+      arguments: packArgs(args.pack),
+    });
     if ((result as { isError?: boolean }).isError) {
       throw new Error(textOf(result) || "get_context returned an error.");
     }
