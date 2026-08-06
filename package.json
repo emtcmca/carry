@@ -18,7 +18,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "smoke": "tsx scripts/smoke.ts",
-    "demo": "npm run build && tsx scripts/demo.ts"
+    "demo": "tsx scripts/demo.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.14.0",

@@ -12,21 +12,22 @@
  *   carry status --url <mcpUrl> [--token <readOrWriteToken>]
  *   carry push --url <mcpUrl> --from <f1> [f2 ...] [--title <t>] [--token <writeToken>]
  *   carry get  --url <mcpUrl> [--token <readOrWriteToken>]
+ *   carry pull --url <mcpUrl> --to <dir> [--token <readOrWriteToken>]
  *   carry --help
  *
  * Token resolution:
- *   push:          --token, else CARRY_WRITE_TOKEN.
- *   get / status:  --token, else CARRY_READ_TOKEN, else CARRY_WRITE_TOKEN.
+ *   push:                --token, else CARRY_WRITE_TOKEN.
+ *   get / pull / status: --token, else CARRY_READ_TOKEN, else CARRY_WRITE_TOKEN.
  */
 
-import { readFileSync, writeFileSync, existsSync, realpathSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, realpathSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { compilePack } from "./compiler.js";
+import { compilePack, splitPackIntoFiles } from "./compiler.js";
 
 export const USAGE = `carry — compile a context pack from Markdown and sync it to a carry instance.
 
@@ -35,6 +36,7 @@ Usage:
   carry status --url <mcpUrl> [--token <readOrWriteToken>]
   carry push   --url <mcpUrl> --from <file> [file ...] [--title <title>] [--token <writeToken>]
   carry get    --url <mcpUrl> [--token <readOrWriteToken>]
+  carry pull   --url <mcpUrl> --to <dir> [--token <readOrWriteToken>]
   carry --help
 
 init    Generate a read + write token pair and write a ready-to-use .env in the
@@ -45,12 +47,15 @@ status  Connect to a carry instance and call list_packs to confirm it is reachab
 push    Read each --from file, compile a pack (stamping source/gitHash/builtAt/title),
         and push it via the MCP push_context tool. Token: --token or CARRY_WRITE_TOKEN.
 get     Read and print the current pack via get_context.
-        Token: --token, else CARRY_READ_TOKEN, else CARRY_WRITE_TOKEN.`;
+        Token: --token, else CARRY_READ_TOKEN, else CARRY_WRITE_TOKEN.
+pull    Fetch the current pack and split it back into files by their source markers,
+        writing each into <dir>. The inverse of push — sync your command/config files
+        across machines. Token: --token, else CARRY_READ_TOKEN, else CARRY_WRITE_TOKEN.`;
 
 /** Placeholder URL printed by `carry init` when the user hasn't deployed yet. */
 export const DEFAULT_MCP_URL = "https://YOUR-INSTANCE.onrender.com/mcp";
 
-export type Command = "push" | "get" | "init" | "status" | "help";
+export type Command = "push" | "get" | "pull" | "init" | "status" | "help";
 
 /** The result of parsing argv. `error` set means "print it and exit non-zero". */
 export interface ParsedArgs {
@@ -59,6 +64,8 @@ export interface ParsedArgs {
   from: string[];
   title?: string;
   token?: string;
+  /** `pull` only: target directory to write the pulled source files into. */
+  to?: string;
   /** `init` only: namespace name to stamp into .env (defaults to "me"). */
   namespace?: string;
   /** `init` only: allow overwriting an existing .env. */
@@ -79,7 +86,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (!command || command === "help" || command === "--help" || command === "-h") {
     return { command: "help", from: [] };
   }
-  if (command !== "push" && command !== "get" && command !== "init" && command !== "status") {
+  if (
+    command !== "push" &&
+    command !== "get" &&
+    command !== "pull" &&
+    command !== "init" &&
+    command !== "status"
+  ) {
     return { command: "help", from: [], error: `Unknown command: ${command}` };
   }
 
@@ -92,6 +105,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
         break;
       case "--token":
         parsed.token = rest[++i];
+        break;
+      case "--to":
+        parsed.to = rest[++i];
         break;
       case "--title":
         parsed.title = rest[++i];
@@ -326,6 +342,65 @@ async function runGet(args: ParsedArgs, env: NodeJS.ProcessEnv): Promise<void> {
   }
 }
 
+/**
+ * Reduce a pack's stamped source name to a safe basename. The compiler only ever
+ * stamps basenames, but a hand-crafted pack could contain a traversal like
+ * `../../x`; we strip any path and reject `.`/`..` so `carry pull` can never write
+ * outside its target directory. Returns "" for an unsafe/empty name (skip it).
+ */
+function safeName(name: string): string {
+  const base = name.split(/[/\\]/).pop() ?? "";
+  if (base === "" || base === "." || base === "..") return "";
+  return base;
+}
+
+/** `carry pull` — fetch the pack and split it back into files under --to. */
+async function runPull(args: ParsedArgs, env: NodeJS.ProcessEnv): Promise<void> {
+  if (!args.url) throw new Error("pull requires --url <mcpUrl>.");
+  if (!args.to) throw new Error("pull requires --to <dir>.");
+
+  const token = resolveGetToken(args.token, env);
+  if (!token) {
+    throw new Error(
+      "No token. Pass --token <readOrWriteToken> or set CARRY_READ_TOKEN (or CARRY_WRITE_TOKEN).",
+    );
+  }
+
+  const client = await connect(args.url, token);
+  let pack: string;
+  try {
+    const result = await client.callTool({ name: "get_context", arguments: {} });
+    if ((result as { isError?: boolean }).isError) {
+      throw new Error(textOf(result) || "get_context returned an error.");
+    }
+    pack = textOf(result);
+  } finally {
+    await client.close();
+  }
+
+  const files = splitPackIntoFiles(pack);
+  if (files.length === 0) {
+    throw new Error(
+      "The pack has no <!-- source: ... --> markers, so there are no files to pull " +
+        "(it wasn't compiled from files via `carry push --from`).",
+    );
+  }
+
+  mkdirSync(args.to, { recursive: true });
+  let written = 0;
+  for (const f of files) {
+    const safe = safeName(f.name);
+    if (!safe) {
+      process.stderr.write(`  skipped unsafe source name: ${JSON.stringify(f.name)}\n`);
+      continue;
+    }
+    writeFileSync(join(args.to, safe), f.content, "utf8");
+    process.stdout.write(`  wrote ${join(args.to, safe)}\n`);
+    written++;
+  }
+  process.stdout.write(`carry: pulled ${written} file(s) into ${args.to}\n`);
+}
+
 /** Injectable side-effect seams for `runInit`, so tests never touch the real cwd or stdout. */
 export interface InitDeps {
   /** Directory the .env is written into. Defaults to process.cwd(). */
@@ -407,6 +482,7 @@ async function run(args: ParsedArgs): Promise<void> {
     return;
   }
   if (args.command === "status") return runStatus(args, process.env);
+  if (args.command === "pull") return runPull(args, process.env);
   if (args.command === "push") return runPush(args, process.env);
   return runGet(args, process.env);
 }

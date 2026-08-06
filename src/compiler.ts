@@ -72,3 +72,40 @@ export function compilePack(inputs: CompilePackInput): CompiledPack {
 
   return { content, meta };
 }
+
+/** One file recovered from a compiled pack: its stamped name and verbatim body. */
+export interface PulledFile {
+  name: string;
+  content: string;
+}
+
+/**
+ * The inverse of `compilePack`'s `content`: split a pack back into its source files
+ * by the `<!-- source: <name> -->` markers the compiler stamps.
+ *
+ * Works on either the raw compiled `content` or the full `get_context` output —
+ * anything before the first marker (the `# Context pack ...` header and the
+ * `<!-- meta: ... -->` line) is simply ignored, since nothing precedes the first
+ * marker in a compiled pack. Pure: no FS, no clock.
+ *
+ * Faithfully recovers each body: the compiler joins blocks with a `\n\n` separator,
+ * so every block except the last carries a trailing `\n\n` that is not part of the
+ * file — we strip exactly that, and leave the final block untouched. A pack with no
+ * markers (e.g. one pushed as raw content, not compiled from files) yields `[]`.
+ */
+export function splitPackIntoFiles(pack: string): PulledFile[] {
+  const marker = /<!-- source: (.*?) -->\n/g;
+  const matches = [...pack.matchAll(marker)];
+  const files: PulledFile[] = [];
+  for (let i = 0; i < matches.length; i++) {
+    const name = matches[i][1].trim();
+    const start = (matches[i].index ?? 0) + matches[i][0].length;
+    const isLast = i === matches.length - 1;
+    const end = isLast ? pack.length : (matches[i + 1].index ?? pack.length);
+    let content = pack.slice(start, end);
+    // Non-final blocks end in the compiler's `\n\n` join separator — strip it.
+    if (!isLast && content.endsWith("\n\n")) content = content.slice(0, -2);
+    files.push({ name, content });
+  }
+  return files;
+}
